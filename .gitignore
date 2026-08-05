@@ -1,5 +1,23 @@
-.pio
-.vscode/.browse.c_cpp.db*
-.vscode/c_cpp_properties.json
-.vscode/launch.json
-.vscode/ipch
+.pio/
+.vscode/
+.pioenvs/
+*.pio
+*.pyc
+*.tmp
+*.log
+*.gz
+*.zip
+*.bin
+# User-specific files
+*.swp
+*.swo
+.DS_Store
+
+# PlatformIO build files
+build/
+lib/.cache/
+
+# Arduino temporary files
+*.elf
+*.hex
+*.bin

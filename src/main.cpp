@@ -1,15 +1,14 @@
 #include <Arduino.h>
+#include "Tasks.h"
 
-// put function declarations here:
-int myFunction(int, int);
+Tasks tasks;
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+    tasks.begin();
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+    tasks.loop();
 }
 
 // put function definitions here:
