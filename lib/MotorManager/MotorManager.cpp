@@ -1,89 +1,67 @@
 #include "MotorManager.h"
 
-MotorManager::MotorManager(uint8_t belt1_in1, uint8_t belt1_in2, 
-                           uint8_t belt2_in1, uint8_t belt2_in2,
-                           uint8_t door_in1,  uint8_t door_in2) 
-    : pinBeltM1_IN1(belt1_in1), pinBeltM1_IN2(belt1_in2),
-      pinBeltM2_IN1(belt2_in1), pinBeltM2_IN2(belt2_in2),
-      pinDoor_IN1(door_in1),    pinDoor_IN2(door_in2),
-      isBeltRunning(false),     isDoorOpenStatus(false) {}
+MotorManager::MotorManager(uint8_t m1_in1, uint8_t m1_in2, uint8_t m2_in1, uint8_t m2_in2)
+    : m1_in1Pin(m1_in1), m1_in2Pin(m1_in2), 
+      m2_in1Pin(m2_in1), m2_in2Pin(m2_in2), 
+      motorMutex(NULL) {}
 
 void MotorManager::begin() {
-    // إعداد أطراف مواتير السير
-    pinMode(pinBeltM1_IN1, OUTPUT);
-    pinMode(pinBeltM1_IN2, OUTPUT);
-    pinMode(pinBeltM2_IN1, OUTPUT);
-    pinMode(pinBeltM2_IN2, OUTPUT);
+    if (motorMutex == NULL) {
+        motorMutex = xSemaphoreCreateMutex();
+    }
 
-    // إعداد أطراف ماتور البوابة
-    pinMode(pinDoor_IN1, OUTPUT);
-    pinMode(pinDoor_IN2, OUTPUT);
+    pinMode(m1_in1Pin, OUTPUT);
+    pinMode(m1_in2Pin, OUTPUT);
+    pinMode(m2_in1Pin, OUTPUT);
+    pinMode(m2_in2Pin, OUTPUT);
 
-    // إيقاف جميع المواتير فوراً عند التشغيل للحماية
-    stopBelt();
-    stopDoor();
+    stop(MotorID::BOTH);
 }
 
-// ----------------- التحكم في السير -----------------
-void MotorManager::moveBeltForward() {
-    digitalWrite(pinBeltM1_IN1, HIGH);
-    digitalWrite(pinBeltM1_IN2, LOW);
-    digitalWrite(pinBeltM2_IN1, HIGH);
-    digitalWrite(pinBeltM2_IN2, LOW);
-    isBeltRunning = true;
+void MotorManager::setMotorState(uint8_t in1, uint8_t in2, MotorDirection dir, uint8_t speed) {
+    switch (dir) {
+        case MotorDirection::FORWARD:
+            analogWrite(in1, speed);
+            analogWrite(in2, 0);
+            break;
+        case MotorDirection::BACKWARD:
+            analogWrite(in1, 0);
+            analogWrite(in2, speed);
+            break;
+        case MotorDirection::STOP:
+        default:
+            analogWrite(in1, 0);
+            analogWrite(in2, 0);
+            break;
+    }
 }
 
-void MotorManager::moveBeltBackward() {
-    digitalWrite(pinBeltM1_IN1, LOW);
-    digitalWrite(pinBeltM1_IN2, HIGH);
-    digitalWrite(pinBeltM2_IN1, LOW);
-    digitalWrite(pinBeltM2_IN2, HIGH);
-    isBeltRunning = true;
+void MotorManager::run(MotorID motor, MotorDirection dir, uint8_t speed) {
+    if (motorMutex != NULL && xSemaphoreTake(motorMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (motor == MotorID::MOTOR_1 || motor == MotorID::BOTH) {
+            setMotorState(m1_in1Pin, m1_in2Pin, dir, speed);
+        }
+        if (motor == MotorID::MOTOR_2 || motor == MotorID::BOTH) {
+            setMotorState(m2_in1Pin, m2_in2Pin, dir, speed);
+        }
+        xSemaphoreGive(motorMutex);
+    }
 }
 
-void MotorManager::stopBelt() {
-    digitalWrite(pinBeltM1_IN1, LOW);
-    digitalWrite(pinBeltM1_IN2, LOW);
-    digitalWrite(pinBeltM2_IN1, LOW);
-    digitalWrite(pinBeltM2_IN2, LOW);
-    isBeltRunning = false;
+void MotorManager::forward(MotorID motor, uint8_t speed) {
+    run(motor, MotorDirection::FORWARD, speed);
 }
 
-void MotorManager::dispenseConveyorSequence(uint32_t runDurationMs) {
-    moveBeltForward();
-    vTaskDelay(pdMS_TO_TICKS(runDurationMs)); // زمن تحريك السير المرن دون تعطيل الـ CPU
-    stopBelt();
+void MotorManager::backward(MotorID motor, uint8_t speed) {
+    run(motor, MotorDirection::BACKWARD, speed);
 }
 
-// ----------------- التحكم في البوابة -----------------
-void MotorManager::openDoor() {
-    digitalWrite(pinDoor_IN1, HIGH);
-    digitalWrite(pinDoor_IN2, LOW);
-    isDoorOpenStatus = true;
+void MotorManager::stop(MotorID motor) {
+    run(motor, MotorDirection::STOP, 0);
 }
 
-void MotorManager::closeDoor() {
-    digitalWrite(pinDoor_IN1, LOW);
-    digitalWrite(pinDoor_IN2, HIGH);
-    isDoorOpenStatus = false;
-}
-
-void MotorManager::stopDoor() {
-    digitalWrite(pinDoor_IN1, LOW);
-    digitalWrite(pinDoor_IN2, LOW);
-}
-
-void MotorManager::operateDoorSequence(uint32_t openDurationMs) {
-    // 1. فتح البوابة (دوران الماتور لمدة ثانية)
-    openDoor();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    stopDoor();
-
-    // 2. الانتظار لمهلة أخذ المريض للدواء
-    vTaskDelay(pdMS_TO_TICKS(openDurationMs));
-
-    // 3. إغلاق البوابة (دوران عكسي لمدة ثانية)
-    closeDoor();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    stopDoor();
+void MotorManager::runForDuration(MotorID motor, MotorDirection dir, uint32_t durationMs, uint8_t speed) {
+    run(motor, dir, speed);
+    vTaskDelay(pdMS_TO_TICKS(durationMs)); // انتظار آمن في FreeRTOS
+    stop(motor);
 }

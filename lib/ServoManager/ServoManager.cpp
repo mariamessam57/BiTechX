@@ -1,47 +1,46 @@
 #include "ServoManager.h"
 
-ServoManager::ServoManager() {}
+ServoManager::ServoManager(uint8_t pin)
+    : carouselServo(pin), currentSection(1) {}
 
 void ServoManager::begin() {
-    // ربط السيرفو بالطرف المحدد في config.h
-    dispenserServo.attach(PIN_SERVO_DISPENSER);
-    
-    // العودة للسكشن الأول كوضع افتراضي عند التشغيل
-    selectSlot(1);
+    carouselServo.begin();
+    stop();
+    currentSection = 1;
 }
 
-void ServoManager::setAngle(float angle) {
-    // حماية الحدود لسيرفو 360 درجة
-    if (angle < 0) angle = 0;
-    if (angle > 360) angle = 360; 
-    
-    dispenserServo.write(static_cast<int>(angle));
+void ServoManager::stop() {
+    carouselServo.write(SERVO_STOP);
 }
 
-void ServoManager::selectSlot(uint8_t slotNumber) {
-    // حماية: التأكد أن رقم السكشن بين 1 و 7
-    if (slotNumber < 1 || slotNumber > TOTAL_SLOTS) {
-        return;
+void ServoManager::rotateToNextSection() {
+   
+    carouselServo.write(SERVO_FORWARD_SPEED);
+    vTaskDelay(pdMS_TO_TICKS(STEP_ROTATION_MS));
+
+   
+    stop();
+    vTaskDelay(pdMS_TO_TICKS(150)); // استقرار ميكانيكي
+
+    currentSection++;
+    if (currentSection > 7) {
+        currentSection = 1;
     }
-    
-    // حساب الزاوية بناءً على رقم السكشن (Slot 1 = 0°, Slot 2 = 51.4°, ...)
-    float targetAngle = (slotNumber - 1) * ANGLE_PER_SLOT;
-    setAngle(targetAngle);
 }
 
-// ============================================================
-//  تنفيذ دوال التوافق بنفس الأسماء القديمة بالضبط
-// ============================================================
+void ServoManager::rotateToSection(uint8_t targetSection) {
+    if (targetSection < 1 || targetSection > 7) return;
 
-void ServoManager::moveDoorServo(float angle) {
-    // تركناها فاضية لمنع الكراش، لأن البوابة أصبحت تُدار بموتور N20 عبر MotorManager
+    while (currentSection != targetSection) {
+        rotateToNextSection();
+    }
 }
 
-void ServoManager::moveMainServo(float angle) {
-    setAngle(angle);
+void ServoManager::resetToFirstSection() {
+    currentSection = 1;
+    stop();
 }
 
-void ServoManager::moveMedicineServo(uint8_t slot, float angle) {
-    // عند استدعاء هذه الدالة القديمة، توجّه السيرفو أوتوماتيكياً للسكشن المحدد
-    selectSlot(slot);
+uint8_t ServoManager::getCurrentSection() const {
+    return currentSection;
 }

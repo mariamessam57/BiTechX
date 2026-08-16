@@ -1,64 +1,108 @@
 #include "AudioManager.h"
 
-AudioManager::AudioManager() : dfSerial(2), isDfPlayerReady(false) {}
+// استخدام منفذ Serial 2 المدمج في الـ ESP32
+AudioManager::AudioManager(uint8_t rx, uint8_t tx, uint8_t busy)
+    : audioSerial(2), rxPin(rx), txPin(tx), busyPin(busy), audioMutex(NULL), isInitialized(false) {}
 
-void AudioManager::begin() {
-    // تهيئة الـ Buzzer
-    pinMode(PIN_BUZZER, OUTPUT);
-    digitalWrite(PIN_BUZZER, LOW);
+bool AudioManager::begin(uint8_t initialVolume) {
+    if (audioMutex == NULL) {
+        audioMutex = xSemaphoreCreateMutex();
+    }
+
+    if (busyPin != 255) {
+        // تفعيل المقاومة الداخلية لمنع القراءات العائمة
+        pinMode(busyPin, INPUT_PULLUP);
+    }
+
+    // تهيئة الـ UART بمعدل 9600 Baud الخاص بـ DFPlayer
+    audioSerial.begin(9600, SERIAL_8N1, rxPin, txPin);
+    vTaskDelay(pdMS_TO_TICKS(500)); // مهلة لاستقرار اتصال السيريال
+
+    if (!dfPlayer.begin(audioSerial)) {
+        isInitialized = false;
+        return false;
+    }
+
+    isInitialized = true;
+    setVolume(initialVolume);
+    vTaskDelay(pdMS_TO_TICKS(100));
     
-    // تهيئة السيريال للـ DFPlayer على UART2
-    dfSerial.begin(9600, SERIAL_8N1, PIN_DFPLAYER_RX, PIN_DFPLAYER_TX);
-    
-    if (dfPlayer.begin(dfSerial)) {
-        isDfPlayerReady = true;
-        dfPlayer.volume(20);
-    } else {
-        isDfPlayerReady = false;
-    }
-}
-
-// الدالة القديمة المباشرة للتنبيه النجاح/الجرعة
-void AudioManager::playNotification() {
-    if (isDfPlayerReady) {
-        dfPlayer.play(1); // تشغيل المقطع رقم 1 (تنبيه الجرعة)
-    } else {
-        playBuzzerBeep(150);
-    }
-}
-
-// الدالة القديمة المباشرة لنغمة الخطأ (متوافقة مع FreeRTOS)
-void AudioManager::playErrorTone() {
-    for (int i = 0; i < 3; i++) {
-        digitalWrite(PIN_BUZZER, HIGH);
-        vTaskDelay(pdMS_TO_TICKS(80)); // Non-blocking delay for FreeRTOS
-        digitalWrite(PIN_BUZZER, LOW);
-        vTaskDelay(pdMS_TO_TICKS(80));
-    }
-}
-
-void AudioManager::playBuzzerBeep(uint16_t durationMs) {
-    digitalWrite(PIN_BUZZER, HIGH);
-    vTaskDelay(pdMS_TO_TICKS(durationMs));
-    digitalWrite(PIN_BUZZER, LOW);
-}
-
-void AudioManager::playTrack(uint8_t trackNumber) {
-    if (isDfPlayerReady) {
-        dfPlayer.play(trackNumber);
-    } else {
-        playBuzzerBeep(200);
-    }
+    return true;
 }
 
 void AudioManager::setVolume(uint8_t volume) {
-    if (isDfPlayerReady && volume <= 30) {
+    if (!isInitialized) return;
+    
+    if (audioMutex != NULL && xSemaphoreTake(audioMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        volume = constrain(volume, 0, 30);
         dfPlayer.volume(volume);
+        vTaskDelay(pdMS_TO_TICKS(20)); // مهلة بسيطة لمعالجة الأمر في DFPlayer
+        xSemaphoreGive(audioMutex);
     }
 }
 
-void AudioManager::stopAudio() {
-    if (isDfPlayerReady) {
-        dfPlayer.stop();
+void AudioManager::playTrack(SoundTrack track) {
+    playTrackNumber(static_cast<uint16_t>(track));
+}
+
+void AudioManager::playTrackNumber(uint16_t trackNumber) {
+    if (!isInitialized) return;
+
+    if (audioMutex != NULL && xSemaphoreTake(audioMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        dfPlayer.play(trackNumber);
+        vTaskDelay(pdMS_TO_TICKS(50)); // مهلة لبدء قراءة الملف الصوتي
+        xSemaphoreGive(audioMutex);
     }
+}
+
+void AudioManager::stop() {
+    if (!isInitialized) return;
+
+    if (audioMutex != NULL && xSemaphoreTake(audioMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        dfPlayer.stop();
+        vTaskDelay(pdMS_TO_TICKS(20));
+        xSemaphoreGive(audioMutex);
+    }
+}
+
+void AudioManager::pause() {
+    if (!isInitialized) return;
+
+    if (audioMutex != NULL && xSemaphoreTake(audioMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        dfPlayer.pause();
+        vTaskDelay(pdMS_TO_TICKS(20));
+        xSemaphoreGive(audioMutex);
+    }
+}
+
+void AudioManager::resume() {
+    if (!isInitialized) return;
+
+    if (audioMutex != NULL && xSemaphoreTake(audioMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        dfPlayer.start();
+        vTaskDelay(pdMS_TO_TICKS(20));
+        xSemaphoreGive(audioMutex);
+    }
+}
+
+void AudioManager::triggerMedicineAlarm() {
+    // تشغيل صوت التنبيه الخاص بموعد تناول الدواء
+    playTrack(SoundTrack::MEDICINE_REMINDER);
+}
+
+bool AudioManager::isPlaying() {
+    if (!isInitialized) return false;
+
+    // الطريقة الأولى والأسرع: فحص بنة الـ BUSY المباشرة
+    if (busyPin != 255) {
+        return digitalRead(busyPin) == LOW;
+    }
+
+    // الطريقة البديلة: الاستعلام عبر أوامر السيريال بحماية الـ Mutex
+    bool active = false;
+    if (audioMutex != NULL && xSemaphoreTake(audioMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        active = (dfPlayer.readState() == 1);
+        xSemaphoreGive(audioMutex);
+    }
+    return active;
 }

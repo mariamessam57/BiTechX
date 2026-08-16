@@ -9,51 +9,53 @@ void ServoControl::begin() {
         servoMutex = xSemaphoreCreateMutex();
     }
 
-    // 2. ربط السيرفو بالـ Pin وتصفير الزاوية
-    myServo.attach(servoPin);
+    // 2. حجز تايمرات PWM الخاصة بـ ESP32 لضمان استقرار الإشارة
+    //علشان لو السيرفوهين هيشتغلو مع بعض ميحلش تداخل 
+    ESP32PWM::allocateTimer(0);
+    ESP32PWM::allocateTimer(1);
+    ESP32PWM::allocateTimer(2);
+    ESP32PWM::allocateTimer(3);
+
+    myServo.setPeriodHertz(50); // معيار 50Hz القياسي للسيرفو
+
+    // 3. ربط السيرفو بالـ Pin مع الحدود النبضية القياسية وتصفير الموضع
+    myServo.attach(servoPin, 500, 2400);
     write(0);
 }
 
 void ServoControl::write(int angle) {
-    // تأمين الـ FreeRTOS (حجز السيرفو للـ Task الحالية)
     if (servoMutex != NULL && xSemaphoreTake(servoMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        
-        // شروط الأمان لتحديد حدود الزوايا المسموحة (حتى 360 درجة)
+       
         if (angle < 0) angle = 0;
         if (angle > 360) angle = 360; 
 
         currentAngle = angle;
 
-        // التعرّف التلقائي على حالة التوصيل
         if (!myServo.attached()) {
-            myServo.attach(servoPin);
+            myServo.attach(servoPin, 500, 2400);
         }
 
-        // إرسال الإشارة المباشرة للسيرفو
         myServo.write(currentAngle);
 
-        // تحرير السيرفو لتستطيع الـ Tasks الأخرى استخدامه
         xSemaphoreGive(servoMutex);
     }
 }
 
 void ServoControl::writeSlowly(int targetAngle, uint32_t stepDelayMs) {
-    // شروط الأمان للحدود
     if (targetAngle < 0) targetAngle = 0;
     if (targetAngle > 360) targetAngle = 360;
 
     int startAngle = currentAngle;
 
-    // حركة تدريجية للأمام أو الخلف بسلام مع FreeRTOS Delay
     if (startAngle < targetAngle) {
         for (int a = startAngle; a <= targetAngle; a++) {
             write(a);
-            vTaskDelay(pdMS_TO_TICKS(stepDelayMs)); // تأخير آمن لا يعطل الـ CPU
+            vTaskDelay(pdMS_TO_TICKS(stepDelayMs)); // تأخير آمن لا يعطل باقي المهام
         }
     } else {
         for (int a = startAngle; a >= targetAngle; a--) {
             write(a);
-            vTaskDelay(pdMS_TO_TICKS(stepDelayMs)); // تأخير آمن لا يعطل الـ CPU
+            vTaskDelay(pdMS_TO_TICKS(stepDelayMs));
         }
     }
 }
@@ -61,7 +63,7 @@ void ServoControl::writeSlowly(int targetAngle, uint32_t stepDelayMs) {
 int ServoControl::read() const {
     return currentAngle;
 }
-
+//pwm فصل   
 void ServoControl::detach() {
     if (servoMutex != NULL && xSemaphoreTake(servoMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (myServo.attached()) {
@@ -70,11 +72,11 @@ void ServoControl::detach() {
         xSemaphoreGive(servoMutex);
     }
 }
-
+//pwm تشغيل
 void ServoControl::attach() {
     if (servoMutex != NULL && xSemaphoreTake(servoMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (!myServo.attached()) {
-            myServo.attach(servoPin);
+            myServo.attach(servoPin, 500, 2400);
         }
         xSemaphoreGive(servoMutex);
     }
