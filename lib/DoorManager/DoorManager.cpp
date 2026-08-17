@@ -39,6 +39,3 @@ bool DoorManager::isOpen() const {
     return currentState == DoorState::OPEN;
 }
 
-bool DoorManager::isClosed() const {
-    return currentState == DoorState::CLOSED;
-}

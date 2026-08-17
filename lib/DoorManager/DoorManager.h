@@ -32,5 +32,4 @@ public:
 
     DoorState getState() const;
     bool isOpen() const;
-    bool isClosed() const;
 };

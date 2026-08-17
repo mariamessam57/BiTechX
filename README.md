@@ -20,7 +20,6 @@ The system automatically reminds patients of their medication schedule, detects 
 * 📦 IR Sensor for Medicine Verification
 * 🔘 Manual Dispense Button
 * ♻️ Reset Button
-* 🚧 Limit Switch Protection
 * 🧵 FreeRTOS Multitasking
 * 🧩 Modular C++ Architecture
 
@@ -40,7 +39,6 @@ The system automatically reminds patients of their medication schedule, detects 
 * RGB LED
 * Buzzer
 * Push Buttons
-* Limit Switch
 * Buck Converter
 * Power Supply
 
@@ -109,7 +107,6 @@ Responsible for reading:
 
 * Ultrasonic Sensor
 * IR Sensor
-* Limit Switch
 
 ---
 
