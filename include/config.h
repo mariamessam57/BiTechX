@@ -6,6 +6,14 @@
 // SPI bus and TFT hardware config
 // TFT Model: ST7789 (1.47", 172x320 pixels, SPI, 8-pin)
 // =============================
+#ifndef LOW
+#define LOW  0
+#endif
+
+#ifndef HIGH
+#define HIGH 1
+#endif
+
 #define TFT_SPI_HOST         SPI3_HOST
 #define TFT_MOSI_PIN         23
 #define TFT_MISO_PIN         19
@@ -50,6 +58,10 @@
 // Default IR digital polarity. This is kept configurable because the exact module
 // can vary between active-LOW and active-HIGH outputs depending on the sensor board.
 #define IR_SENSOR_ACTIVE_LEVEL       LOW
+#define PERSON_DETECTION_DISTANCE_CM  50.0f
+#define PERSON_DETECTION_REQUIRED_READINGS 3U
+#define PERSON_DETECTION_TIMEOUT_MS   30000UL
+#define PERSON_DETECTION_RETRY_INTERVAL_MS 250UL
 
 // =============================
 // Timing configuration
@@ -61,6 +73,14 @@
 #define DOOR_CLOSE_DELAY_MS           1500UL
 #define IR_DETECTION_TIMEOUT_MS       5000UL
 #define ULTRASONIC_ECHO_TIMEOUT_US    25000UL
+
+// =============================
+// Medicine Verification (IR Sensor)
+// =============================
+#define MEDICINE_VERIFY_WAIT_MS           500UL
+#define MEDICINE_DETECTION_REQUIRED_READINGS 3U
+#define MEDICINE_VERIFY_RETRY_INTERVAL_MS 150UL
+#define MEDICINE_VERIFY_TIMEOUT_MS       8000UL
 
 // =============================
 // Common RGB565 color values

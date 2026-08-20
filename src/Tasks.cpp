@@ -6,6 +6,12 @@ Tasks::Tasks()
       previousState(DispenserState::IDLE),
       stateStartTime(0),
       lastTimeCheck(0),
+      personDetectionStartTime(0),
+      lastPersonDetectionAttemptMs(0),
+      personDetectionConfirmCount(0),
+      medicineVerifyStartTime(0),
+      lastMedicineVerifyAttemptMs(0),
+      medicineDetectionConfirmCount(0),
       activeSection(0),
       lastTriggeredScheduleKey(0xFFFFFFFFUL),
       scheduleCount(0),
@@ -18,7 +24,9 @@ void Tasks::begin() {
     Serial.println("[Tasks] Initializing system components...");
 
     displayManager.begin();
-    timeManager.begin();
+    if (!timeManager.begin()) {
+        Serial.println("[Tasks] RTC initialization failed; scheduler blocked");
+    }
     sensorManager.begin();
 
     audioManager = new AudioManager(AUDIO_SERIAL_RX_PIN, AUDIO_SERIAL_TX_PIN, AUDIO_BUSY_PIN);
@@ -50,7 +58,9 @@ void Tasks::loop() {
     uint32_t now = millis();
 
     if (now - lastTimeCheck >= MEDICINE_CHECK_INTERVAL_MS) {
-        timeManager.updateTime();
+        if (!timeManager.updateTime()) {
+            Serial.println("[Tasks] RTC read failed during periodic update");
+        }
         lastTimeCheck = now;
     }
 
@@ -88,20 +98,47 @@ void Tasks::loop() {
     }
 }
 
+uint32_t Tasks::buildScheduleOccurrenceKey(uint8_t hour, uint8_t minute) {
+    uint8_t currentDay = 0;
+    uint8_t currentMonth = 0;
+    uint16_t currentYear = 0;
+    uint8_t currentHour = 0;
+    uint8_t currentMinute = 0;
+    uint8_t currentSecond = 0;
+
+    if (!timeManager.getCurrentTime(currentHour, currentMinute, currentSecond, currentDay, currentMonth, currentYear)) {
+        return 0xFFFFFFFFUL;
+    }
+
+    const uint32_t dateKey = (static_cast<uint32_t>(currentYear) * 10000UL) +
+                             (static_cast<uint32_t>(currentMonth) * 100UL) +
+                             static_cast<uint32_t>(currentDay);
+    return (dateKey * 10000UL) + (static_cast<uint32_t>(hour) * 100UL) + static_cast<uint32_t>(minute);
+}
+
 bool Tasks::isCurrentTriggeredMinute(uint8_t hour, uint8_t minute) {
-    uint32_t scheduleKey = (uint32_t(hour) * 60UL) + uint32_t(minute);
+    if (!timeManager.isRtcValid()) {
+        Serial.println("[Tasks] RTC invalid; schedule check skipped");
+        return false;
+    }
 
-    if (timeManager.isScheduledTime(hour, minute)) {
-        if (scheduleKey == lastTriggeredScheduleKey) {
-            return false;
+    const uint32_t scheduleKey = buildScheduleOccurrenceKey(hour, minute);
+    if (scheduleKey == 0xFFFFFFFFUL) {
+        return false;
+    }
+
+    if (!timeManager.isScheduledTime(hour, minute)) {
+        if (lastTriggeredScheduleKey == scheduleKey) {
+            lastTriggeredScheduleKey = 0xFFFFFFFFUL;
         }
-        return true;
+        return false;
     }
 
-    if (lastTriggeredScheduleKey == scheduleKey) {
-        lastTriggeredScheduleKey = 0xFFFFFFFFUL;
+    if (scheduleKey == lastTriggeredScheduleKey) {
+        return false;
     }
-    return false;
+
+    return true;
 }
 
 bool Tasks::isScheduleTriggered(const MedicineSchedule& schedule) {
@@ -136,8 +173,14 @@ void Tasks::runIdleState() {
 void Tasks::runCheckTimeState() {
     for (uint8_t i = 0; i < scheduleCount; ++i) {
         if (isScheduleTriggered(schedules[i])) {
+            if (!timeManager.isRtcValid()) {
+                Serial.println("[Tasks] RTC invalid; refusing to trigger medicine schedule");
+                changeState(DispenserState::IDLE);
+                return;
+            }
+
             activeSection = schedules[i].section;
-            uint32_t triggerKey = (uint32_t(schedules[i].hour) * 60UL) + uint32_t(schedules[i].minute);
+            uint32_t triggerKey = buildScheduleOccurrenceKey(schedules[i].hour, schedules[i].minute);
             lastTriggeredScheduleKey = triggerKey;
             Serial.printf("[Tasks] Medicine time match: %02d:%02d section=%u\n",
                           schedules[i].hour, schedules[i].minute, activeSection);
@@ -161,20 +204,72 @@ void Tasks::runAlertState() {
     changeState(DispenserState::WAIT_FOR_PERSON);
 }
 
+void Tasks::resetPersonDetectionState() {
+    personDetectionStartTime = millis();
+    lastPersonDetectionAttemptMs = 0;
+    personDetectionConfirmCount = 0;
+}
+
+void Tasks::resetMedicineVerifyState() {
+    medicineVerifyStartTime = millis();
+    lastMedicineVerifyAttemptMs = 0;
+    medicineDetectionConfirmCount = 0;
+}
+
 void Tasks::runWaitForPersonState() {
     if (previousState != DispenserState::WAIT_FOR_PERSON) {
         Serial.println("[Tasks] WAIT_FOR_PERSON");
         displayManager.showIdleScreen(12, 0, "WAIT PERSON");
+        resetPersonDetectionState();
     }
 
-    float distance = sensorManager.readUltrasonicDistance();
-    if (distance > 0.0f && distance < 50.0f) {
-        Serial.printf("[Tasks] PERSON_PRESENT at %.1f cm\n", distance);
-        changeState(DispenserState::OPEN_DOOR);
+    const uint32_t now = millis();
+    if ((now - personDetectionStartTime) >= PERSON_DETECTION_TIMEOUT_MS) {
+        Serial.printf("[Tasks] PERSON_DETECTION_TIMEOUT after %lu ms; returning to IDLE\n",
+                      static_cast<unsigned long>(PERSON_DETECTION_TIMEOUT_MS));
+        resetPersonDetectionState();
+        changeState(DispenserState::IDLE);
+        return;
+    }
+
+    if ((now - lastPersonDetectionAttemptMs) < PERSON_DETECTION_RETRY_INTERVAL_MS) {
+        return;
+    }
+
+    lastPersonDetectionAttemptMs = now;
+    const float distance = sensorManager.readUltrasonicDistance();
+
+    if (distance <= 0.0f || distance == -1.0f) {
+        Serial.println("[Tasks] Invalid ultrasonic reading during person detection");
+        personDetectionConfirmCount = 0;
+        return;
+    }
+
+    if (distance <= PERSON_DETECTION_DISTANCE_CM) {
+        personDetectionConfirmCount++;
+        Serial.printf("[Tasks] Person detection confirmation %u/%u at %.2f cm\n",
+                      personDetectionConfirmCount,
+                      PERSON_DETECTION_REQUIRED_READINGS,
+                      distance);
+
+        if (personDetectionConfirmCount >= PERSON_DETECTION_REQUIRED_READINGS) {
+            Serial.printf("[Tasks] PERSON_PRESENT confirmed at threshold %.1f cm\n",
+                          PERSON_DETECTION_DISTANCE_CM);
+            resetPersonDetectionState();
+            changeState(DispenserState::OPEN_DOOR);
+            return;
+        }
+    } else {
+        Serial.printf("[Tasks] Distance %.2f cm is outside threshold %.1f cm\n",
+                      distance,
+                      PERSON_DETECTION_DISTANCE_CM);
+        personDetectionConfirmCount = 0;
     }
 }
 
 void Tasks::runOpenDoorState() {
+    const uint32_t elapsed = millis() - stateStartTime;
+
     if (previousState != DispenserState::OPEN_DOOR) {
         Serial.println("[Tasks] OPEN_DOOR");
         displayManager.showDispensingScreen(1);
@@ -183,12 +278,20 @@ void Tasks::runOpenDoorState() {
         }
     }
 
-    if (millis() - stateStartTime >= DOOR_OPEN_DELAY_MS) {
+    if (elapsed >= DOOR_OPEN_DELAY_MS) {
         changeState(DispenserState::ROTATE_DISPENSER);
+        return;
+    }
+
+    if (elapsed > DOOR_OPEN_DELAY_MS + 1000UL) {
+        Serial.println("[Tasks] DOOR_OPEN timeout exceeded; entering ERROR");
+        triggerError("DOOR OPEN TIMED OUT");
     }
 }
 
 void Tasks::runRotateDispenserState() {
+    const uint32_t elapsed = millis() - stateStartTime;
+
     if (previousState != DispenserState::ROTATE_DISPENSER) {
         const uint8_t targetSection = activeSection + 1U;
         Serial.printf("[Tasks] ROTATE_DISPENSER to section %u\n", targetSection);
@@ -198,44 +301,97 @@ void Tasks::runRotateDispenserState() {
         }
     }
 
-    if (millis() - stateStartTime >= DISPENSER_ROTATION_DELAY_MS) {
+    if (elapsed >= DISPENSER_ROTATION_DELAY_MS) {
         changeState(DispenserState::DISPENSE_DOSE_SERVO);
+        return;
+    }
+
+    if (elapsed > DISPENSER_ROTATION_DELAY_MS + 1000UL) {
+        Serial.println("[Tasks] DISPENSER rotation timeout exceeded; entering ERROR");
+        triggerError("DISPENSER ROTATION TIMED OUT");
     }
 }
 
 void Tasks::runDispenseDoseServoState() {
+    const uint32_t elapsed = millis() - stateStartTime;
+
     if (previousState != DispenserState::DISPENSE_DOSE_SERVO) {
         const uint8_t targetSection = activeSection + 1U;
         Serial.printf("[Tasks] DISPENSE_DOSE_SERVO section %u\n", targetSection);
         displayManager.showDispensingScreen(3);
         if (servoManager) {
-            servoManager->rotateToSection(targetSection);
+            servoManager->stop();
         }
     }
 
-    if (millis() - stateStartTime >= DOSE_SERVO_DELAY_MS) {
+    if (elapsed >= DOSE_SERVO_DELAY_MS) {
         if (servoManager) {
             servoManager->stop();
         }
         changeState(DispenserState::CHECK_MEDICINE_IR);
+        return;
+    }
+
+    if (elapsed > DOSE_SERVO_DELAY_MS + 1000UL) {
+        Serial.println("[Tasks] DOSE servo timeout exceeded; entering ERROR");
+        triggerError("DOSE SERVO TIMED OUT");
     }
 }
 
 void Tasks::runCheckMedicineIRState() {
+    // State-entry protection: (re)initialize the verification timer and
+    // confirmation counters exactly once, on the first loop iteration after
+    // entering this state. This also serves as the "wait for medicine
+    // arrival" anchor point, so the wait period is not restarted on
+    // subsequent loop iterations.
     if (previousState != DispenserState::CHECK_MEDICINE_IR) {
         Serial.println("[Tasks] CHECK_MEDICINE_IR");
         displayManager.showDispensingScreen(4);
-    }
-
-    if (sensorManager.isIrActive()) {
-        Serial.println("[Tasks] MEDICINE_DETECTED");
-        changeState(DispenserState::CLOSE_DOOR);
+        resetMedicineVerifyState();
         return;
     }
 
-    if (millis() - stateStartTime >= IR_DETECTION_TIMEOUT_MS) {
-        Serial.println("[Tasks] IR timeout -> ERROR");
+    const uint32_t now = millis();
+    const uint32_t elapsedSinceEntry = now - medicineVerifyStartTime;
+
+    // Give the medicine time to physically reach the IR sensor before the
+    // first read is taken. A single early "inactive" reading here would be
+    // meaningless, not a real failed detection.
+    if (elapsedSinceEntry < MEDICINE_VERIFY_WAIT_MS) {
+        return;
+    }
+
+    // Bound the whole verification window (arrival wait + confirmation
+    // checks). If medicine is never confirmed within this window, fail safe
+    // into ERROR rather than assuming success or retrying dispensing.
+    if (elapsedSinceEntry >= (MEDICINE_VERIFY_WAIT_MS + MEDICINE_VERIFY_TIMEOUT_MS)) {
+        Serial.println("[Tasks] MEDICINE_VERIFY_TIMEOUT -> ERROR");
         triggerError("MEDICINE NOT DETECTED");
+        return;
+    }
+
+    // Poll the IR sensor periodically instead of every loop iteration.
+    if ((now - lastMedicineVerifyAttemptMs) < MEDICINE_VERIFY_RETRY_INTERVAL_MS) {
+        return;
+    }
+    lastMedicineVerifyAttemptMs = now;
+
+    if (sensorManager.isMedicineDetected()) {
+        medicineDetectionConfirmCount++;
+        Serial.printf("[Tasks] Medicine detection confirmation %u/%u\n",
+                      medicineDetectionConfirmCount,
+                      MEDICINE_DETECTION_REQUIRED_READINGS);
+
+        if (medicineDetectionConfirmCount >= MEDICINE_DETECTION_REQUIRED_READINGS) {
+            Serial.println("[Tasks] MEDICINE_DETECTED (confirmed)");
+            resetMedicineVerifyState();
+            changeState(DispenserState::CLOSE_DOOR);
+            return;
+        }
+    } else {
+        // A single inactive reading breaks the consecutive-detection streak,
+        // so a brief noisy pulse cannot count as confirmation.
+        medicineDetectionConfirmCount = 0;
     }
 }
 
@@ -258,6 +414,13 @@ void Tasks::runErrorState() {
     if (audioManager && audioManager->isReady()) {
         // keep the safe error state visible; do not auto-transition back to idle
     }
+
+    if (doorManager) {
+        doorManager->close();
+    }
+    if (servoManager) {
+        servoManager->stop();
+    }
 }
 
 void Tasks::resetToIdle() {
@@ -275,6 +438,13 @@ void Tasks::resetToIdle() {
 void Tasks::triggerError(const char* message) {
     Serial.printf("[Tasks] ERROR: %s\n", message);
     displayManager.showErrorScreen(message);
+
+    if (doorManager) {
+        doorManager->close();
+    }
+    if (servoManager) {
+        servoManager->stop();
+    }
 
     if (audioManager && audioManager->isReady()) {
         audioManager->playTrack(SoundTrack::EMERGENCY_ALARM);

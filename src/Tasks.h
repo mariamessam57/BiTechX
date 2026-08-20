@@ -35,9 +35,18 @@ private:
     DispenserState previousState;
     uint32_t stateStartTime;
     uint32_t lastTimeCheck;
+    uint32_t personDetectionStartTime;
+    uint32_t lastPersonDetectionAttemptMs;
+    uint8_t personDetectionConfirmCount;
+    uint32_t medicineVerifyStartTime;
+    uint32_t lastMedicineVerifyAttemptMs;
+    uint8_t medicineDetectionConfirmCount;
     uint8_t activeSection;
     uint32_t lastTriggeredScheduleKey;
     bool isCurrentTriggeredMinute(uint8_t hour, uint8_t minute);
+    void resetPersonDetectionState();
+    void resetMedicineVerifyState();
+    uint32_t buildScheduleOccurrenceKey(uint8_t hour, uint8_t minute);
 
     struct MedicineSchedule {
         uint8_t hour;
