@@ -13,6 +13,9 @@
 #include "../tasks/MedicineTask.h"
 #include "../tasks/PersonDetectionTask.h"
 #include "../tasks/DispensingTask.h"
+#include "../iot/WiFiManager.h"
+#include "../iot/MQTTManager.h"
+#include "../iot/TelemetryManager.h"
 
 // Top-level states owned by the controller. The five granular dispensing
 // sub-steps (rotate/door/dose/IR/close) are intentionally NOT modeled here -
@@ -62,6 +65,15 @@ private:
     void runErrorState();
     void resetToIdle();
     void triggerError(const char* message);
+
+
+    // IoT managers
+    WiFiManager* wifiManager;
+    MQTTManager* mqttManager;
+    TelemetryManager* telemetryManager;
+
+
+   
 
 public:
     DispenserController();

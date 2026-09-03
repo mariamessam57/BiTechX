@@ -130,3 +130,16 @@
 #define TFT_COLOR_YELLOW     0xFFE0u
 #define TFT_COLOR_CYAN       0x07FFu
 #define TFT_COLOR_MAGENTA    0xF81Fu
+
+
+
+
+#define WIFI_SSID "اسم الشبكة"
+#define WIFI_PASSWORD "الباسورد"
+
+#define MQTT_SERVER "broker.hivemq.com"
+#define MQTT_PORT 1883
+
+
+
+#define MQTT_TOPIC_TELEMETRY "bitechx/device/telemetry"
