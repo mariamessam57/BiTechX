@@ -4,12 +4,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
-enum class MotorID {
-    MOTOR_1,
-    MOTOR_2,
-    BOTH
-};
-
 enum class MotorDirection {
     FORWARD,
     BACKWARD,
@@ -18,29 +12,31 @@ enum class MotorDirection {
 
 class MotorManager {
 private:
-   
-    uint8_t m1_in1Pin;
-    uint8_t m1_in2Pin;
-
-    
-    uint8_t m2_in1Pin;
-    uint8_t m2_in2Pin;
-
+    uint8_t in1Pin;
+    uint8_t in2Pin;
     SemaphoreHandle_t motorMutex;
+    
+    bool motorRunning;
+    uint32_t motorStartTime;
+    MotorDirection currentDirection;
 
     void setMotorState(uint8_t in1, uint8_t in2, MotorDirection dir, uint8_t speed);
 
 public:
-    MotorManager(uint8_t m1_in1, uint8_t m1_in2, uint8_t m2_in1, uint8_t m2_in2);
+    MotorManager(uint8_t in1, uint8_t in2);
 
     void begin();
+    void run(MotorDirection dir, uint8_t speed = 150);
+    void forward(uint8_t speed = 150);
+    void backward(uint8_t speed = 150);
+    void stop();
+    void runForDuration(MotorDirection dir, uint32_t durationMs, uint8_t speed = 150);
     
-    // دوال التحكم الأساسية في الاتجاه والسرعة
-    void run(MotorID motor, MotorDirection dir, uint8_t speed = 150);
-    void forward(MotorID motor = MotorID::BOTH, uint8_t speed = 150);
-    void backward(MotorID motor = MotorID::BOTH, uint8_t speed = 150);
-    void stop(MotorID motor = MotorID::BOTH);
-
-    // تشغيل المحرك لفترة زمنية محددة دون إيقاف باقي مهام الـ FreeRTOS
-    void runForDuration(MotorID motor, MotorDirection dir, uint32_t durationMs, uint8_t speed = 150);
+    // Conveyor-specific methods
+    void startConveyor(uint8_t speed = 150);
+    void stopConveyor();
+    
+    // State query methods
+    bool isRunning() const;
+    uint32_t getRunTimeMs() const;
 };
