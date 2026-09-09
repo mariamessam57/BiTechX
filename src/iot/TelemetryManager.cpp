@@ -11,8 +11,30 @@ void TelemetryManager::begin()
     Serial.println("[TelemetryManager] Telemetry initialized");
 }
 
+bool TelemetryManager::sendStatus(const char* status)
+{
+    if (!mqtt.isConnected())
+    {
+        Serial.println("[TelemetryManager] MQTT not connected");
+        return false;
+    }
+
+    JsonDocument doc;
+
+    doc["device_id"] = MQTT_DEVICE_ID;
+    doc["status"] = status;
+
+    char payload[256];
+
+    serializeJson(doc, payload, sizeof(payload));
+
+    Serial.println("[TelemetryManager] Sending status:");
+    Serial.println(payload);
+
+    return mqtt.publish(MQTT_TOPIC_STATUS, payload);
+}
+
 bool TelemetryManager::sendDoseTaken(
-    const char* medicine,
     int section,
     const char* scheduledTime,
     const char* timestamp)
@@ -20,7 +42,6 @@ bool TelemetryManager::sendDoseTaken(
     return publishEvent(
         "dose_taken",
         "taken",
-        medicine,
         section,
         scheduledTime,
         timestamp
@@ -28,7 +49,6 @@ bool TelemetryManager::sendDoseTaken(
 }
 
 bool TelemetryManager::sendDoseDelayed(
-    const char* medicine,
     int section,
     const char* scheduledTime,
     const char* timestamp)
@@ -36,7 +56,6 @@ bool TelemetryManager::sendDoseDelayed(
     return publishEvent(
         "dose_delayed",
         "delayed",
-        medicine,
         section,
         scheduledTime,
         timestamp
@@ -44,7 +63,6 @@ bool TelemetryManager::sendDoseDelayed(
 }
 
 bool TelemetryManager::sendDoseMissed(
-    const char* medicine,
     int section,
     const char* scheduledTime,
     const char* timestamp)
@@ -52,7 +70,6 @@ bool TelemetryManager::sendDoseMissed(
     return publishEvent(
         "dose_missed",
         "missed",
-        medicine,
         section,
         scheduledTime,
         timestamp
@@ -62,7 +79,6 @@ bool TelemetryManager::sendDoseMissed(
 bool TelemetryManager::publishEvent(
     const char* event,
     const char* status,
-    const char* medicine,
     int section,
     const char* scheduledTime,
     const char* timestamp)
@@ -75,9 +91,8 @@ bool TelemetryManager::publishEvent(
 
     JsonDocument doc;
 
-    doc["device_id"] = "BiTechX_001";
+    doc["device_id"] = MQTT_DEVICE_ID;
     doc["event"] = event;
-    doc["medicine"] = medicine;
     doc["section"] = section;
     doc["scheduled_time"] = scheduledTime;
     doc["timestamp"] = timestamp;

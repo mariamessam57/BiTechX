@@ -3,7 +3,8 @@
 
 MQTTManager::MQTTManager()
     : mqttClient(espClient),
-      lastReconnectAttempt(0)
+      lastReconnectAttempt(0),
+      messageCallback(nullptr)
 {
 }
 
@@ -12,6 +13,14 @@ void MQTTManager::begin()
     Serial.println("[MQTTManager] Initializing MQTT...");
 
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+
+    // Set callback for incoming MQTT messages
+    mqttClient.setCallback(
+        [this](char* topic, byte* payload, unsigned int length)
+        {
+            mqttCallback(topic, payload, length);
+        }
+    );
 
     lastReconnectAttempt = 0;
 }
@@ -91,6 +100,36 @@ bool MQTTManager::subscribe(const char* topic)
     return success;
 }
 
+void MQTTManager::setMessageCallback(MQTTMessageCallback callback)
+{
+    messageCallback = callback;
+}
+
+void MQTTManager::mqttCallback(char* topic, byte* payload, unsigned int length)
+{
+    // Convert payload to a null-terminated string
+    char message[length + 1];
+
+    for (unsigned int i = 0; i < length; i++)
+    {
+        message[i] = (char)payload[i];
+    }
+
+    message[length] = '\0';
+
+    Serial.println("[MQTTManager] Message received:");
+    Serial.print("Topic: ");
+    Serial.println(topic);
+    Serial.print("Payload: ");
+    Serial.println(message);
+
+    // Send message to the registered callback
+    if (messageCallback != nullptr)
+    {
+        messageCallback(topic, message);
+    }
+}
+
 void MQTTManager::reconnect()
 {
     Serial.println("[MQTTManager] Connecting to MQTT broker...");
@@ -104,6 +143,12 @@ void MQTTManager::reconnect()
     if (mqttClient.connect(clientId.c_str()))
     {
         Serial.println("[MQTTManager] MQTT connected!");
+
+        // Subscribe to Dashboard → ESP32 commands
+        if (subscribe(MQTT_TOPIC_COMMANDS))
+        {
+            Serial.println("[MQTTManager] Command subscription ready");
+        }
     }
     else
     {

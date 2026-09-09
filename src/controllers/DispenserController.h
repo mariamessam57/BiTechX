@@ -17,10 +17,7 @@
 #include "../iot/MQTTManager.h"
 #include "../iot/TelemetryManager.h"
 
-// Top-level states owned by the controller. The five granular dispensing
-// sub-steps (rotate/door/dose/IR/close) are intentionally NOT modeled here -
-// they are owned exclusively by DispensingTask so there is a single owner
-// for that sequence instead of two state machines describing the same thing.
+// Top-level states owned by the controller.
 enum class DispenserState {
     IDLE,
     CHECK_TIME,
@@ -30,11 +27,7 @@ enum class DispenserState {
     ERROR
 };
 
-// DispenserController is the high-level coordinator. It owns the hardware
-// managers and the task objects, and moves between the top-level states by
-// delegating to the appropriate task. It does not implement any ultrasonic
-// calculation, IR reading, servo PWM, RTC hardware, or display drawing
-// itself - those all stay inside their respective manager/task.
+// DispenserController is the high-level coordinator.
 class DispenserController {
 private:
     DisplayManager displayManager;
@@ -55,6 +48,8 @@ private:
     uint32_t stateStartTime;
     uint32_t lastTimeCheck;
     uint8_t activeSection;
+    uint8_t activeScheduledHour;
+    uint8_t activeScheduledMinute;
 
     void changeState(DispenserState nextState);
     void runIdleState();
@@ -65,22 +60,33 @@ private:
     void runErrorState();
     void resetToIdle();
     void triggerError(const char* message);
+    void sendDoseTelemetry(bool taken);
 
+    
 
     // IoT managers
     WiFiManager* wifiManager;
     MQTTManager* mqttManager;
     TelemetryManager* telemetryManager;
 
-
-   
-
 public:
     DispenserController();
+
     void begin();
     void loop();
 
-    DisplayManager& getDisplayManager() { return displayManager; }
-    void addMedicineSchedule(uint8_t hour, uint8_t minute, uint8_t section);
+    // MQTT command handler
+    void handleMqttCommand(const char* topic, const char* payload);
+
+    DisplayManager& getDisplayManager() {
+        return displayManager;
+    }
+
+    void addMedicineSchedule(
+        uint8_t hour,
+        uint8_t minute,
+        uint8_t section
+    );
+
     void clearSchedules();
 };

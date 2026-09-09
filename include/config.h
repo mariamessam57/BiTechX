@@ -140,6 +140,16 @@
 #define MQTT_SERVER "broker.hivemq.com"
 #define MQTT_PORT 1883
 
+// =============================
+// BiTechX MQTT Configuration
+// =============================
 
+#define MQTT_DEVICE_ID "BiTechX_001"
 
+// ESP32 → Dashboard
 #define MQTT_TOPIC_TELEMETRY "bitechx/device/telemetry"
+#define MQTT_TOPIC_STATUS    "bitechx/device/status"
+#define MQTT_TOPIC_ALERTS    "bitechx/device/alerts"
+
+// Dashboard → ESP32
+#define MQTT_TOPIC_COMMANDS  "bitechx/device/commands"
