@@ -582,6 +582,11 @@ void DispenserController::triggerError(
         "[DispenserController] ERROR: %s\n",
         message
     );
+    if (telemetryManager) {
+    telemetryManager->sendAlert(
+        message ? message : "System error"
+    );
+}
 
     displayManager.showErrorScreen(
         message
@@ -650,22 +655,20 @@ void DispenserController::handleMqttCommand(
     const char* topic,
     const char* payload
 ) {
-    Serial.println("[DispenserController] MQTT command received");
+    Serial.println("[DispenserController] ThingsBoard RPC Command received");
+    Serial.printf("Topic: %s\nPayload: %s\n", topic, payload);
 
-    Serial.print("Topic: ");
-    Serial.println(topic);
-
-    Serial.print("Payload: ");
-    Serial.println(payload);
-
-    // Make sure the message came from the commands topic
-    if (strcmp(topic, MQTT_TOPIC_COMMANDS) != 0) {
-        Serial.println("[DispenserController] Unknown MQTT topic");
+    // التحقق أن المسار قادم من ThingsBoard RPC: v1/devices/me/rpc/request/{id}
+    const char* rpcPrefix = "v1/devices/me/rpc/request/";
+    if (strncmp(topic, rpcPrefix, strlen(rpcPrefix)) != 0) {
+        Serial.println("[DispenserController] Unknown MQTT topic, expected RPC");
         return;
     }
 
-    JsonDocument doc;
+    // استخراج requestId للرد على نفس الطلب في الداشبورد
+    const char* requestId = topic + strlen(rpcPrefix);
 
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
 
     if (error) {
@@ -674,20 +677,77 @@ void DispenserController::handleMqttCommand(
         return;
     }
 
-    const char* command = doc["command"];
+    // ThingsBoard يرسل اسم الأمر في حقل "method"
+    const char* method = doc["method"];
+    if (method == nullptr) {
+        method = doc["command"];
+    }
 
-    if (command == nullptr) {
-        Serial.println("[DispenserController] Missing command field");
+    if (method == nullptr) {
+        Serial.println("[DispenserController] Missing method/command field");
         return;
     }
 
     // ========================================================
-    // SET SCHEDULES
+    // 1. RESET
     // ========================================================
+    if (strcmp(method, "reset") == 0) {
+        Serial.println("[DispenserController] RPC: Reset triggered");
+        resetToIdle();
+        if (mqttManager) {
+            mqttManager->sendRpcResponse(requestId, "{\"status\":\"success\",\"message\":\"Device reset to IDLE\"}");
+        }
+        return;
+    }
 
-    if (strcmp(command, "set_schedules") == 0) {
+    // ========================================================
+    // 2. GET STATUS
+    // ========================================================
+    if (strcmp(method, "get_status") == 0) {
+        Serial.println("[DispenserController] RPC: Status requested");
 
-        JsonArray schedules = doc["schedules"].as<JsonArray>();
+        const char* statusStr = "idle";
+        switch (currentState) {
+            case DispenserState::IDLE:            statusStr = "idle"; break;
+            case DispenserState::CHECK_TIME:      statusStr = "check_time"; break;
+            case DispenserState::ALERT:           statusStr = "alert"; break;
+            case DispenserState::WAIT_FOR_PERSON: statusStr = "waiting_for_person"; break;
+            case DispenserState::DISPENSING:      statusStr = "dispensing"; break;
+            case DispenserState::ERROR:           statusStr = "error"; break;
+        }
+
+        if (telemetryManager) {
+            telemetryManager->sendStatus(statusStr);
+        }
+
+        if (mqttManager) {
+            char response[128];
+            snprintf(response, sizeof(response), "{\"current_state\":\"%s\"}", statusStr);
+            mqttManager->sendRpcResponse(requestId, response);
+        }
+        return;
+    }
+
+    // ========================================================
+    // 3. CLEAR SCHEDULES
+    // ========================================================
+    if (strcmp(method, "clear_schedules") == 0) {
+        clearSchedules();
+        Serial.println("[DispenserController] RPC: All schedules cleared");
+        if (mqttManager) {
+            mqttManager->sendRpcResponse(requestId, "{\"status\":\"cleared\"}");
+        }
+        return;
+    }
+
+    // ========================================================
+    // 4. SET SCHEDULES
+    // ========================================================
+    if (strcmp(method, "set_schedules") == 0) {
+        JsonArray schedules = doc["params"]["schedules"].as<JsonArray>();
+        if (schedules.isNull()) {
+            schedules = doc["schedules"].as<JsonArray>();
+        }
 
         if (schedules.isNull()) {
             Serial.println("[DispenserController] Missing schedules array");
@@ -695,121 +755,39 @@ void DispenserController::handleMqttCommand(
         }
 
         clearSchedules();
-
         uint8_t addedSchedules = 0;
 
-        for (JsonObject schedule : schedules) {
-
-            if (!schedule["hour"].is<uint8_t>() ||
-                !schedule["minute"].is<uint8_t>() ||
-                !schedule["section"].is<uint8_t>()) {
-
-                Serial.println(
-                    "[DispenserController] Invalid schedule entry"
-                );
-
+        for (JsonObject s : schedules) {
+            if (!s["hour"].is<uint8_t>() || !s["minute"].is<uint8_t>() || !s["section"].is<uint8_t>()) {
                 continue;
             }
 
-            uint8_t hour = schedule["hour"];
-            uint8_t minute = schedule["minute"];
-            uint8_t section = schedule["section"];
+            uint8_t h = s["hour"];
+            uint8_t m = s["minute"];
+            uint8_t sec = s["section"];
 
-            if (hour > 23 || minute > 59) {
-                Serial.println(
-                    "[DispenserController] Invalid time"
-                );
-
-                continue;
+            if (h <= 23 && m <= 59 && sec < 4) {
+                addMedicineSchedule(h, m, sec);
+                addedSchedules++;
             }
-
-            if (section >= 4) {
-                Serial.println(
-                    "[DispenserController] Invalid section"
-                );
-
-                continue;
-            }
-
-            addMedicineSchedule(
-                hour,
-                minute,
-                section
-            );
-
-            addedSchedules++;
-
-            Serial.printf(
-                "[DispenserController] Schedule added: %02u:%02u -> section %u\n",
-                hour,
-                minute,
-                section
-            );
         }
 
-        Serial.printf(
-            "[DispenserController] Schedules updated: %u\n",
-            addedSchedules
-        );
-
+        Serial.printf("[DispenserController] RPC: %u schedules configured\n", addedSchedules);
+        if (mqttManager) {
+            char res[64];
+            snprintf(res, sizeof(res), "{\"configured\":%u}", addedSchedules);
+            mqttManager->sendRpcResponse(requestId, res);
+        }
         return;
     }
 
     // ========================================================
-    // CLEAR SCHEDULES
+    // UNKNOWN METHOD
     // ========================================================
-
-    if (strcmp(command, "clear_schedules") == 0) {
-
-        clearSchedules();
-
-        Serial.println(
-            "[DispenserController] All schedules cleared"
-        );
-
-        return;
+    Serial.printf("[DispenserController] Unknown RPC method: %s\n", method);
+    if (mqttManager) {
+        mqttManager->sendRpcResponse(requestId, "{\"error\":\"Unknown method\"}");
     }
-
-    // ========================================================
-    // GET STATUS
-    // ========================================================
-
-    if (strcmp(command, "get_status") == 0) {
-
-        Serial.println(
-            "[DispenserController] Status request received"
-        );
-
-        // Status response will be implemented
-        // after the command system is completed.
-
-        return;
-    }
-
-    // ========================================================
-    // RESET
-    // ========================================================
-
-    if (strcmp(command, "reset") == 0) {
-
-        Serial.println(
-            "[DispenserController] Reset command received"
-        );
-
-        resetToIdle();
-
-        return;
-    }
-
-    // ========================================================
-    // UNKNOWN COMMAND
-    // ========================================================
-
-    Serial.print(
-        "[DispenserController] Unknown command: "
-    );
-
-    Serial.println(command);
 }
 void DispenserController::sendDoseTelemetry(bool taken)
 {

@@ -3,7 +3,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
-class WiFiManager {
+class WiFiManager
+{
 public:
     WiFiManager();
 
@@ -11,6 +12,7 @@ public:
     void update();
 
     bool isConnected() const;
+
     void reconnect();
 
 private:

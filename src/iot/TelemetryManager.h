@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-
 #include "MQTTManager.h"
 
 class TelemetryManager
@@ -13,8 +12,37 @@ public:
     void begin();
 
     bool sendStatus(
-    const char* status
-);
+        const char* status
+    );
+
+    bool sendDeviceState(
+        const char* state,
+        int activeSection = -1
+    );
+
+    bool sendAlert(
+        const char* message
+    );
+
+    bool sendSensorData(
+        bool personDetected,
+        float distanceCm,
+        bool medicineDetected
+    );
+
+    bool sendSystemTelemetry(
+        const char* deviceStatus,
+        const char* connectionStatus,
+        const char* currentState,
+        const char* medicationName,
+        const char* nextDoseTime,
+        const char* doseStatus,
+        const char* doorStatus,
+        const char* conveyorStatus,
+        bool personDetected,
+        float distanceCm,
+        bool medicineDetected
+    );
 
     bool sendDoseTaken(
         int section,
@@ -34,14 +62,18 @@ public:
         const char* timestamp
     );
 
-private:
-    MQTTManager& mqtt;
-
-    bool publishEvent(
+    bool sendEvent(
         const char* event,
         const char* status,
         int section,
         const char* scheduledTime,
         const char* timestamp
+    );
+
+private:
+    MQTTManager& mqtt;
+
+    bool publishJson(
+        JsonDocument& doc
     );
 };

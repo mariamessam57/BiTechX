@@ -1,45 +1,161 @@
 #include "TelemetryManager.h"
 #include "config.h"
 
-TelemetryManager::TelemetryManager(MQTTManager& mqttManager)
+TelemetryManager::TelemetryManager(
+    MQTTManager& mqttManager
+)
     : mqtt(mqttManager)
 {
 }
 
 void TelemetryManager::begin()
 {
-    Serial.println("[TelemetryManager] Telemetry initialized");
+    Serial.println(
+        "[TelemetryManager] ThingsBoard Telemetry initialized"
+    );
 }
 
-bool TelemetryManager::sendStatus(const char* status)
+bool TelemetryManager::publishJson(
+    JsonDocument& doc
+)
 {
     if (!mqtt.isConnected())
     {
-        Serial.println("[TelemetryManager] MQTT not connected");
+        Serial.println(
+            "[TelemetryManager] MQTT not connected"
+        );
+
         return false;
     }
 
-    JsonDocument doc;
+    char payload[512];
 
-    doc["device_id"] = MQTT_DEVICE_ID;
-    doc["status"] = status;
+    size_t written = serializeJson(
+        doc,
+        payload,
+        sizeof(payload)
+    );
 
-    char payload[256];
+    if (written == 0)
+    {
+        Serial.println(
+            "[TelemetryManager] Failed to serialize telemetry"
+        );
 
-    serializeJson(doc, payload, sizeof(payload));
+        return false;
+    }
 
-    Serial.println("[TelemetryManager] Sending status:");
+    Serial.print(
+        "[TelemetryManager] Telemetry: "
+    );
+
     Serial.println(payload);
 
-    return mqtt.publish(MQTT_TOPIC_STATUS, payload);
+    return mqtt.publish(
+        MQTT_TOPIC_TELEMETRY,
+        payload
+    );
+}
+
+bool TelemetryManager::sendStatus(
+    const char* status
+)
+{
+    JsonDocument doc;
+
+    doc["device_status"] = status;
+
+    return publishJson(doc);
+}
+
+bool TelemetryManager::sendDeviceState(
+    const char* state,
+    int activeSection
+)
+{
+    JsonDocument doc;
+
+    doc["device_status"] = state;
+    doc["current_state"] = state;
+
+    if (activeSection >= 0)
+    {
+        doc["active_section"] = activeSection;
+    }
+
+    return publishJson(doc);
+}
+
+bool TelemetryManager::sendAlert(
+    const char* message
+)
+{
+    JsonDocument doc;
+
+    doc["device_status"] = "Alerting";
+    doc["alert_message"] = message;
+    doc["has_alert"] = true;
+
+    return publishJson(doc);
+}
+
+bool TelemetryManager::sendSensorData(
+    bool personDetected,
+    float distanceCm,
+    bool medicineDetected
+)
+{
+    JsonDocument doc;
+
+    doc["person_detected"] = personDetected;
+    doc["distance_cm"] = distanceCm;
+    doc["medicine_detected"] = medicineDetected;
+
+    return publishJson(doc);
+}
+
+bool TelemetryManager::sendSystemTelemetry(
+    const char* deviceStatus,
+    const char* connectionStatus,
+    const char* currentState,
+    const char* medicationName,
+    const char* nextDoseTime,
+    const char* doseStatus,
+    const char* doorStatus,
+    const char* conveyorStatus,
+    bool personDetected,
+    float distanceCm,
+    bool medicineDetected
+)
+{
+    JsonDocument doc;
+
+    doc["device_status"] = deviceStatus;
+    doc["connection_status"] = connectionStatus;
+    doc["current_state"] = currentState;
+
+    doc["medication_name"] = medicationName;
+    doc["next_dose_time"] = nextDoseTime;
+
+    doc["dose_status"] = doseStatus;
+
+    doc["door_status"] = doorStatus;
+    doc["conveyor_status"] = conveyorStatus;
+
+    doc["person_detected"] = personDetected;
+    doc["distance_cm"] = distanceCm;
+    doc["medicine_detected"] = medicineDetected;
+
+    return publishJson(doc);
 }
 
 bool TelemetryManager::sendDoseTaken(
     int section,
     const char* scheduledTime,
-    const char* timestamp)
+    const char* timestamp
+)
 {
-    return publishEvent(
+    return sendEvent(
         "dose_taken",
         "taken",
         section,
@@ -51,9 +167,10 @@ bool TelemetryManager::sendDoseTaken(
 bool TelemetryManager::sendDoseDelayed(
     int section,
     const char* scheduledTime,
-    const char* timestamp)
+    const char* timestamp
+)
 {
-    return publishEvent(
+    return sendEvent(
         "dose_delayed",
         "delayed",
         section,
@@ -65,9 +182,10 @@ bool TelemetryManager::sendDoseDelayed(
 bool TelemetryManager::sendDoseMissed(
     int section,
     const char* scheduledTime,
-    const char* timestamp)
+    const char* timestamp
+)
 {
-    return publishEvent(
+    return sendEvent(
         "dose_missed",
         "missed",
         section,
@@ -76,34 +194,21 @@ bool TelemetryManager::sendDoseMissed(
     );
 }
 
-bool TelemetryManager::publishEvent(
+bool TelemetryManager::sendEvent(
     const char* event,
     const char* status,
     int section,
     const char* scheduledTime,
-    const char* timestamp)
+    const char* timestamp
+)
 {
-    if (!mqtt.isConnected())
-    {
-        Serial.println("[TelemetryManager] MQTT not connected");
-        return false;
-    }
-
     JsonDocument doc;
 
-    doc["device_id"] = MQTT_DEVICE_ID;
-    doc["event"] = event;
-    doc["section"] = section;
-    doc["scheduled_time"] = scheduledTime;
-    doc["timestamp"] = timestamp;
-    doc["status"] = status;
+    doc["last_event"] = event;
+    doc["last_dose_status"] = status;
+    doc["last_dose_section"] = section;
+    doc["last_scheduled_time"] = scheduledTime;
+    doc["last_dose_time"] = timestamp;
 
-    char payload[512];
-
-    serializeJson(doc, payload, sizeof(payload));
-
-    Serial.println("[TelemetryManager] Sending telemetry:");
-    Serial.println(payload);
-
-    return mqtt.publish(MQTT_TOPIC_TELEMETRY, payload);
+    return publishJson(doc);
 }

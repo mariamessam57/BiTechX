@@ -4,10 +4,10 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 
-// MQTT message callback
 using MQTTMessageCallback = void (*)(const char* topic, const char* payload);
 
-class MQTTManager {
+class MQTTManager
+{
 public:
     MQTTManager();
 
@@ -19,8 +19,12 @@ public:
     bool publish(const char* topic, const char* payload);
     bool subscribe(const char* topic);
 
-    // Set callback for incoming MQTT messages
     void setMessageCallback(MQTTMessageCallback callback);
+
+    bool sendRpcResponse(
+        const char* requestId,
+        const char* responseJson
+    );
 
 private:
     WiFiClient espClient;
@@ -31,5 +35,10 @@ private:
     MQTTMessageCallback messageCallback;
 
     void reconnect();
-    void mqttCallback(char* topic, byte* payload, unsigned int length);
+
+    void mqttCallback(
+        char* topic,
+        byte* payload,
+        unsigned int length
+    );
 };

@@ -132,24 +132,38 @@
 #define TFT_COLOR_MAGENTA    0xF81Fu
 
 
+// ============================================================
+// Wi-Fi
+// ============================================================
 
+#define WIFI_SSID "Wokwi-GUEST"
+#define WIFI_PASSWORD ""
 
-#define WIFI_SSID "اسم الشبكة"
-#define WIFI_PASSWORD "الباسورد"
+// ============================================================
+// ThingsBoard MQTT
+// ============================================================
 
-#define MQTT_SERVER "broker.hivemq.com"
+#define MQTT_SERVER "mqtt.thingsboard.cloud"
 #define MQTT_PORT 1883
-
-// =============================
-// BiTechX MQTT Configuration
-// =============================
 
 #define MQTT_DEVICE_ID "BiTechX_001"
 
-// ESP32 → Dashboard
-#define MQTT_TOPIC_TELEMETRY "bitechx/device/telemetry"
-#define MQTT_TOPIC_STATUS    "bitechx/device/status"
-#define MQTT_TOPIC_ALERTS    "bitechx/device/alerts"
+// IMPORTANT:
+// Replace locally with your real ThingsBoard device access token.
+#define MQTT_ACCESS_TOKEN "YOUR_ACCESS_TOKEN"
 
-// Dashboard → ESP32
-#define MQTT_TOPIC_COMMANDS  "bitechx/device/commands"
+#define MQTT_TOPIC_TELEMETRY \
+    "v1/devices/me/telemetry"
+
+#define MQTT_TOPIC_RPC_REQUEST \
+    "v1/devices/me/rpc/request/+"
+
+#define MQTT_TOPIC_RPC_RESPONSE_PREFIX \
+    "v1/devices/me/rpc/response/"
+
+// ============================================================
+// Network Timing
+// ============================================================
+
+#define WIFI_RECONNECT_INTERVAL 10000UL
+#define MQTT_RECONNECT_INTERVAL 5000UL

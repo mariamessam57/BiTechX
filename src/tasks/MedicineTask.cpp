@@ -34,10 +34,16 @@ uint32_t MedicineTask::buildScheduleOccurrenceKey(uint8_t hour, uint8_t minute) 
         return 0xFFFFFFFFUL;
     }
 
-    const uint32_t dateKey = (static_cast<uint32_t>(currentYear) * 10000UL) +
-                             (static_cast<uint32_t>(currentMonth) * 100UL) +
-                             static_cast<uint32_t>(currentDay);
-    return (dateKey * 10000UL) + (static_cast<uint32_t>(hour) * 100UL) + static_cast<uint32_t>(minute);
+    // آمن تماماً داخل 32-bit:
+    // Year offset (12 bits) | Month (4 bits) | Day (5 bits) | Hour (5 bits) | Minute (6 bits) = 32 bits
+    uint32_t key = 0;
+    key |= (static_cast<uint32_t>(currentYear & 0x0FFF) << 20);
+    key |= (static_cast<uint32_t>(currentMonth & 0x0F)   << 16);
+    key |= (static_cast<uint32_t>(currentDay & 0x1F)     << 11);
+    key |= (static_cast<uint32_t>(hour & 0x1F)           << 6);
+    key |= (static_cast<uint32_t>(minute & 0x3F));
+
+    return key;
 }
 
 bool MedicineTask::isCurrentTriggeredMinute(uint8_t hour, uint8_t minute) {
